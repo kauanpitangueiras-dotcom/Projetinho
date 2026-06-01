@@ -1,11 +1,8 @@
-import { v4 as uuidv4 } from 'uuid';
-import { db } from '../db';
+import { prisma } from '../lib/prisma';
+import { UserRole, StatusUsuario } from '@prisma/client';
 import {
-  Professor,
   CriarProfessorDTO,
   AtualizarProfessorDTO,
-  UserRole,
-  StatusUsuario,
   QueryParams,
 } from '../types';
 
@@ -15,76 +12,113 @@ export class ProfessorRepository {
     const numero = Math.floor(Math.random() * 9999)
       .toString()
       .padStart(4, '0');
+
     return `PROF${ano}${numero}`;
   }
 
-  listarTodos(params?: QueryParams): Professor[] {
-    let professores = Array.from(db.professores.values());
+  async listarTodos(params?: QueryParams) {
+    return prisma.professor.findMany({
+      where: {
+        ...(params?.status && {
+          status: params.status,
+        }),
 
-    if (params?.status) {
-      professores = professores.filter((p) => p.status === params.status);
+        ...(params?.busca && {
+          OR: [
+            {
+              nome: {
+                contains: params.busca,
+                mode: 'insensitive',
+              },
+            },
+            {
+              email: {
+                contains: params.busca,
+                mode: 'insensitive',
+              },
+            },
+          ],
+        }),
+      },
+    });
+  }
+
+  async buscarPorId(id: string) {
+    return prisma.professor.findUnique({
+      where: { id },
+    });
+  }
+
+  async buscarPorEmail(email: string) {
+    return prisma.professor.findUnique({
+      where: { email },
+    });
+  }
+
+  async buscarPorCpf(cpf: string) {
+    return prisma.professor.findUnique({
+      where: { cpf },
+    });
+  }
+
+  async criar(dto: CriarProfessorDTO) {
+    return prisma.professor.create({
+      data: {
+        ...dto,
+        registro: this.gerarRegistro(),
+        role: UserRole.PROFESSOR,
+        status: StatusUsuario.ATIVO,
+        disciplinas: dto.disciplinas ?? [],
+      },
+    });
+  }
+
+  async atualizar(id: string, dto: AtualizarProfessorDTO) {
+    try {
+      return await prisma.professor.update({
+        where: { id },
+        data: dto,
+      });
+    } catch {
+      return null;
     }
+  }
 
-    if (params?.busca) {
-      const busca = params.busca.toLowerCase();
-      professores = professores.filter(
-        (p) =>
-          p.nome.toLowerCase().includes(busca) ||
-          p.email.toLowerCase().includes(busca)
-      );
+  async deletar(id: string): Promise<boolean> {
+    try {
+      await prisma.professor.delete({
+        where: { id },
+      });
+
+      return true;
+    } catch {
+      return false;
     }
-
-    return professores;
   }
 
-  buscarPorId(id: string): Professor | undefined {
-    return db.professores.get(id);
-  }
-
-  buscarPorEmail(email: string): Professor | undefined {
-    return Array.from(db.professores.values()).find((p) => p.email === email);
-  }
-
-  buscarPorCpf(cpf: string): Professor | undefined {
-    return Array.from(db.professores.values()).find((p) => p.cpf === cpf);
-  }
-
-  criar(dto: CriarProfessorDTO): Professor {
-    const now = new Date().toISOString();
-    const novoProfessor: Professor = {
-      id: uuidv4(),
-      role: UserRole.PROFESSOR,
-      registro: this.gerarRegistro(),
-      status: StatusUsuario.ATIVO,
-      disciplinas: dto.disciplinas || [],
-      ...dto,
-      criadoEm: now,
-      atualizadoEm: now,
-    };
-
-    db.professores.set(novoProfessor.id, novoProfessor);
-    return novoProfessor;
-  }
-
-  atualizar(id: string, dto: AtualizarProfessorDTO): Professor | null {
-    const professor = db.professores.get(id);
-    if (!professor) return null;
-
-    const professorAtualizado: Professor = {
-      ...professor,
-      ...dto,
-      atualizadoEm: new Date().toISOString(),
-    };
-
-    db.professores.set(id, professorAtualizado);
-    return professorAtualizado;
-  }
-
-  deletar(id: string): boolean {
-    return db.professores.delete(id);
-  }
-
-  contar(): number {
-    return db.professores.size;
+  async contar(): Promise<number> {
+    return prisma.professor.count();
   }
 }
+
+async criar(dto: CriarProfessorDTO) {
+  const { disciplinas, ...dados } = dto;
+
+  return prisma.professor.create({
+    data: {
+      ...dados,
+      registro: this.gerarRegistro(),
+      role: UserRole.PROFESSOR,
+      status: StatusUsuario.ATIVO,
+
+      disciplinas: {
+        connect: disciplinas?.map((id) => ({ id })) ?? [],
+      },
+    },
+
+    include: {
+      disciplinas: true,
+    },
+  });
+}
+
