@@ -1,13 +1,7 @@
-import { v4 as uuidv4 } from 'uuid';
-import { db } from '../db';
-import {
-  Aluno,
-  CriarAlunoDTO,
-  AtualizarAlunoDTO,
-  UserRole,
-  StatusUsuario,
-  QueryParams,
-} from '../types';
+import { PrismaClient, UserRole, StatusUsuario } from '@prisma/client';
+import { CriarAlunoDTO, AtualizarAlunoDTO, QueryParams } from '../types';
+
+const prisma = new PrismaClient();
 
 export class AlunoRepository {
   private gerarMatricula(): string {
@@ -15,76 +9,92 @@ export class AlunoRepository {
     const numero = Math.floor(Math.random() * 9999)
       .toString()
       .padStart(4, '0');
+
     return `ALU${ano}${numero}`;
   }
 
-  listarTodos(params?: QueryParams): Aluno[] {
-    let alunos = Array.from(db.alunos.values());
+  async listarTodos(params?: QueryParams) {
+    return prisma.aluno.findMany({
+      where: {
+        ...(params?.status && { status: params.status }),
 
-    if (params?.status) {
-      alunos = alunos.filter((a) => a.status === params.status);
+        ...(params?.busca && {
+          OR: [
+            {
+              nome: {
+                contains: params.busca,
+                mode: 'insensitive',
+              },
+            },
+            {
+              email: {
+                contains: params.busca,
+                mode: 'insensitive',
+              },
+            },
+          ],
+        }),
+      },
+    });
+  }
+
+  async buscarPorId(id: string) {
+    return prisma.aluno.findUnique({
+      where: { id },
+    });
+  }
+
+  async buscarPorEmail(email: string) {
+    return prisma.aluno.findUnique({
+      where: { email },
+    });
+  }
+
+  async buscarPorCpf(cpf: string) {
+    return prisma.aluno.findUnique({
+      where: { cpf },
+    });
+  }
+
+  async criar(dto: CriarAlunoDTO) {
+    return prisma.aluno.create({
+      data: {
+        ...dto,
+        matricula: this.gerarMatricula(),
+        role: UserRole.ALUNO,
+        status: StatusUsuario.ATIVO,
+        turmas: dto.turmas ?? [],
+      },
+    });
+  }
+
+  async atualizar(id: string, dto: AtualizarAlunoDTO) {
+    try {
+      return await prisma.aluno.update({
+        where: { id },
+        data: dto,
+      });
+    } catch {
+      return null;
     }
+  }
 
-    if (params?.busca) {
-      const busca = params.busca.toLowerCase();
-      alunos = alunos.filter(
-        (a) =>
-          a.nome.toLowerCase().includes(busca) ||
-          a.email.toLowerCase().includes(busca)
-      );
+  async deletar(id: string): Promise<boolean> {
+    try {
+      await prisma.aluno.delete({
+        where: { id },
+      });
+
+      return true;
+    } catch {
+      return false;
     }
-
-    return alunos;
   }
 
-  buscarPorId(id: string): Aluno | undefined {
-    return db.alunos.get(id);
-  }
-
-  buscarPorEmail(email: string): Aluno | undefined {
-    return Array.from(db.alunos.values()).find((a) => a.email === email);
-  }
-
-  buscarPorCpf(cpf: string): Aluno | undefined {
-    return Array.from(db.alunos.values()).find((a) => a.cpf === cpf);
-  }
-
-  criar(dto: CriarAlunoDTO): Aluno {
-    const now = new Date().toISOString();
-    const novoAluno: Aluno = {
-      id: uuidv4(),
-      role: UserRole.ALUNO,
-      matricula: this.gerarMatricula(),
-      status: StatusUsuario.ATIVO,
-      turmas: dto.turmas || [],
-      ...dto,
-      criadoEm: now,
-      atualizadoEm: now,
-    };
-
-    db.alunos.set(novoAluno.id, novoAluno);
-    return novoAluno;
-  }
-
-  atualizar(id: string, dto: AtualizarAlunoDTO): Aluno | null {
-    const aluno = db.alunos.get(id);
-    if (!aluno) return null;
-
-    const alunoAtualizado: Aluno = {
-      ...aluno,
-      ...dto,
-      atualizadoEm: new Date().toISOString(),
-    };
-
-    db.alunos.set(id, alunoAtualizado);
-    return alunoAtualizado;
-  }
-
-  deletar(id: string): boolean {
-    return db.alunos.delete(id);
-  }
-
-  contar(): number {
-    return db.alunos.size;
+  async contar(): Promise<number> {
+    return prisma.aluno.count();
   }
 }
+
+
+
